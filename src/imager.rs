@@ -116,10 +116,18 @@ impl Imager
 
     fn folder_images(directory: &Path, image_size: u32) -> Result<Vec<RgbImage>, Error>
     {
-        let images = directory.read_dir()?.map(|image_file|
+        let images = directory.read_dir()?.filter(|image_file|
         {
-            let image_file = image_file?;
-            let image_path = image_file.path();
+            image_file.as_ref().map(|image_file|
+            {
+                let is_file = image_file.file_type().ok().map(|file_type| file_type.is_file())
+                    .unwrap_or(false);
+
+                is_file
+            }).unwrap_or(true)
+        }).map(|image_file|
+        {
+            let image_path = image_file?.path();
 
             let image = image::open(&image_path).map_err(|err| Error::new(image_path, err))?;
 
