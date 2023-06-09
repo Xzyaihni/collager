@@ -31,7 +31,13 @@ fn main()
         config.pixel_size
     );
 
-    let imager = Imager::new(config.directory, config.pixel_size)
+    let imager_config = imager::Config{
+        image_size: config.pixel_size,
+        allow_rotate: config.allow_rotate,
+        allow_invert: config.allow_invert
+    };
+
+    let imager = Imager::new(config.directory, imager_config)
         .unwrap_or_else(|err| complain(&format!("error opening image directory: {err:?}")));
 
     if config.debug

@@ -9,6 +9,8 @@ pub struct Config
 {
     pub debug: bool,
     pub pixel_size: u32,
+    pub allow_rotate: bool,
+    pub allow_invert: bool,
     pub width: u32,
     pub output: String,
     pub directory: String,
@@ -33,6 +35,12 @@ impl Config
 
             parser.refer(&mut config.debug)
                 .add_option(&["-d", "--debug"], StoreTrue, "enable debug");
+
+            parser.refer(&mut config.allow_rotate)
+                .add_option(&["-r", "--rotate"], StoreTrue, "allow rotating the images");
+
+            parser.refer(&mut config.allow_invert)
+                .add_option(&["-I", "--invert"], StoreTrue, "allow inverting the images");
 
             parser.refer(&mut config.pixel_size)
                 .add_option(&["-s", "--size"], Store, &s_description);
@@ -72,6 +80,8 @@ impl Default for Config
         Self{
             debug: false,
             pixel_size: 16,
+            allow_rotate: false,
+            allow_invert: false,
             width: 16,
             output: "output.png".to_owned(),
             directory: String::new(),

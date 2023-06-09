@@ -7,7 +7,11 @@ use std::{
 use image::{
     RgbImage,
     DynamicImage,
-    imageops::FilterType,
+    imageops::{
+        self,
+        FilterType,
+        colorops
+    },
     error::ImageError
 };
 
@@ -39,6 +43,13 @@ impl From<io::Error> for Error
     }
 }
 
+pub struct Config
+{
+    pub image_size: u32,
+    pub allow_rotate: bool,
+    pub allow_invert: bool
+}
+
 pub struct Imager
 {
     images: Box<[RgbImage]>
@@ -46,9 +57,9 @@ pub struct Imager
 
 impl Imager
 {
-    pub fn new<P: AsRef<Path>>(directory: P, image_size: u32) -> Result<Self, Error>
+    pub fn new<P: AsRef<Path>>(directory: P, config: Config) -> Result<Self, Error>
     {
-        let images = Self::create_images(directory.as_ref(), image_size)?;
+        let images = Self::create_images(directory.as_ref(), config)?;
 
         Ok(Self{images})
     }
@@ -58,7 +69,52 @@ impl Imager
         &self.images
     }
 
-    fn create_images(directory: &Path, image_size: u32) -> Result<Box<[RgbImage]>, Error>
+    fn create_images(directory: &Path, config: Config) -> Result<Box<[RgbImage]>, Error>
+    {
+        let mut images = Self::folder_images(directory, config.image_size)?;
+
+        if config.allow_rotate
+        {
+            let mut rotated = {
+                let images = images.iter();
+
+                let rotated90 = images.clone().map(|image|
+                {
+                    imageops::rotate90(image)
+                });
+
+                let rotated180 = images.clone().map(|image|
+                {
+                    imageops::rotate180(image)
+                });
+
+                let rotated270 = images.map(|image|
+                {
+                    imageops::rotate270(image)
+                });
+
+                rotated90.chain(rotated180).chain(rotated270).collect::<Vec<_>>()
+            };
+
+            images.append(&mut rotated);
+        }
+
+        if config.allow_invert
+        {
+            let mut inverted = images.iter().cloned().map(|mut image|
+            {
+                colorops::invert(&mut image);
+
+                image
+            }).collect::<Vec<_>>();
+
+            images.append(&mut inverted);
+        }
+
+        Ok(images.into_boxed_slice())
+    }
+
+    fn folder_images(directory: &Path, image_size: u32) -> Result<Vec<RgbImage>, Error>
     {
         let images = directory.read_dir()?.map(|image_file|
         {
@@ -72,7 +128,7 @@ impl Imager
             Ok(image.into_rgb8())
         }).collect::<Result<Vec<_>, Error>>()?;
 
-        Ok(images.into_boxed_slice())
+        Ok(images)
     }
 
     fn resize_image(image: DynamicImage, image_size: u32) -> DynamicImage
