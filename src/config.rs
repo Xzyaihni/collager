@@ -33,6 +33,9 @@ impl Config
 
         let o_description = Self::tell_default("output image name", &config.output);
 
+        // will probably crash ur pc, the formula for how many images there will (roughly) be
+        // is (1..depth).map(|d| t.pow(d)).sum()
+        // where t is how many transparent images u have
         let d_description = Self::tell_default(
             "max permutation depth for transparent images",
             &config.depth
