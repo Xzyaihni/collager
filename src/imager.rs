@@ -141,12 +141,15 @@ impl Imager
 
         if depth > 1
         {
+            let mut output_images = Vec::new();
+
             for _ in 0..(depth - 1)
             {
-                let transparent_images_iter =
-                    transparent_images.iter().cloned().collect::<Vec<_>>();
+                let transparent_images_iter = transparent_images.iter().cloned();
 
-                for transparent_image in transparent_images_iter
+                output_images.extend(transparent_images_iter.clone());
+
+                for transparent_image in transparent_images_iter.collect::<Vec<_>>()
                 {
                     for original_transparent in original_transparent_images.iter()
                     {
@@ -157,9 +160,14 @@ impl Imager
                     }
                 }
             }
-        }
 
-        transparent_images
+            output_images.extend(transparent_images.into_iter());
+
+            output_images
+        } else
+        {
+            transparent_images
+        }
     }
 
     fn combine_images<P, Container, Other>(
