@@ -1,17 +1,20 @@
 use std::{
     fs,
     io,
+    borrow::Borrow,
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf}
 };
 
 use image::{
+    Rgba,
+    Pixel,
     RgbImage,
+    RgbaImage,
+    ImageBuffer,
     DynamicImage,
-    imageops::{
-        self,
-        FilterType,
-        colorops
-    },
+    buffer::ConvertBuffer,
+    imageops::FilterType,
     error::ImageError
 };
 
@@ -47,7 +50,8 @@ pub struct Config
 {
     pub image_size: u32,
     pub allow_rotate: bool,
-    pub allow_invert: bool
+    pub allow_invert: bool,
+    pub depth: u32
 }
 
 pub struct Imager
@@ -71,6 +75,129 @@ impl Imager
 
     fn create_images(directory: &Path, config: Config) -> Result<Box<[RgbImage]>, Error>
     {
+        if config.depth == 0
+        {
+            Self::created_unpermuted_images(directory, config)
+        } else
+        {
+            Self::created_permuted_images(directory, config)
+        }
+    }
+
+    fn created_unpermuted_images(
+        directory: &Path,
+        config: Config
+    ) -> Result<Box<[RgbImage]>, Error>
+    {
+        Self::create_mapped_images(directory, config, |image| image.into_rgb8())
+            .map(|images| images.into_boxed_slice())
+    }
+
+    fn created_permuted_images(directory: &Path, config: Config) -> Result<Box<[RgbImage]>, Error>
+    {
+        let depth = config.depth;
+        let images = Self::create_mapped_images(directory, config, |image| image.into_rgba8())?;
+
+        let (transparent_images, solid_images): (Vec<_>, Vec<_>) =
+            images.into_iter().partition(|image|
+            {
+                let contains_transparency = image.pixels().any(|pixel|
+                {
+                    let Rgba([_r, _g, _b, a]) = pixel;
+
+                    *a != u8::MAX
+                });
+
+                contains_transparency
+            });
+
+        let transparent_images = Self::recombine_transparents(&transparent_images, depth);
+
+        let mut permuted_images = Vec::new();
+
+        for solid_image in solid_images.iter()
+        {
+            for transparent_image in transparent_images.iter()
+            {
+                let permutation = Self::combine_images(solid_image.clone(), transparent_image);
+
+                permuted_images.push(permutation);
+            }
+        }
+
+        permuted_images.extend(solid_images.into_iter());
+
+        let images = permuted_images.into_iter().map(|image| image.convert()).collect::<Vec<_>>();
+
+        Ok(images.into_boxed_slice())
+    }
+
+    fn recombine_transparents(
+        original_transparent_images: &[RgbaImage],
+        depth: u32
+    ) -> Vec<RgbaImage>
+    {
+        let mut transparent_images = original_transparent_images.to_vec();
+
+        if depth > 1
+        {
+            for _ in 0..(depth - 1)
+            {
+                let transparent_images_iter =
+                    transparent_images.iter().cloned().collect::<Vec<_>>();
+
+                for transparent_image in transparent_images_iter
+                {
+                    for original_transparent in original_transparent_images.iter()
+                    {
+                        let combined =
+                            Self::combine_images(transparent_image.clone(), original_transparent);
+
+                        transparent_images.push(combined);
+                    }
+                }
+            }
+        }
+
+        transparent_images
+    }
+
+    fn combine_images<P, Container, Other>(
+        mut back: ImageBuffer<P, Container>,
+        other: Other
+    ) -> ImageBuffer<P, Container>
+    where
+        P: Pixel,
+        Container: Deref<Target=[P::Subpixel]> + DerefMut,
+        Other: Borrow<ImageBuffer<P, Container>>
+    {
+        back.pixels_mut().zip(other.borrow().pixels()).for_each(|(pixel, other_pixel)|
+        {
+            pixel.blend(other_pixel);
+        });
+
+        back
+    }
+
+    fn create_mapped_images<T, F>(
+        directory: &Path,
+        config: Config,
+        f: F
+    ) -> Result<Vec<T>, Error>
+    where
+        F: FnMut(DynamicImage) -> T
+    {
+        Self::create_dynamic_images(directory, config).map(|images|
+        {
+            images.into_iter().map(f).collect()
+        })
+    }
+
+    fn create_dynamic_images(
+        directory: &Path,
+        config: Config
+    ) -> Result<Vec<DynamicImage>, Error>
+    {
         let mut images = Self::folder_images(directory, config.image_size)?;
 
         if config.allow_rotate
@@ -80,17 +207,17 @@ impl Imager
 
                 let rotated90 = images.clone().map(|image|
                 {
-                    imageops::rotate90(image)
+                    image.rotate90()
                 });
 
                 let rotated180 = images.clone().map(|image|
                 {
-                    imageops::rotate180(image)
+                    image.rotate180()
                 });
 
                 let rotated270 = images.map(|image|
                 {
-                    imageops::rotate270(image)
+                    image.rotate270()
                 });
 
                 rotated90.chain(rotated180).chain(rotated270).collect::<Vec<_>>()
@@ -103,7 +230,7 @@ impl Imager
         {
             let mut inverted = images.iter().cloned().map(|mut image|
             {
-                colorops::invert(&mut image);
+                image.invert();
 
                 image
             }).collect::<Vec<_>>();
@@ -111,10 +238,10 @@ impl Imager
             images.append(&mut inverted);
         }
 
-        Ok(images.into_boxed_slice())
+        Ok(images)
     }
 
-    fn folder_images(directory: &Path, image_size: u32) -> Result<Vec<RgbImage>, Error>
+    fn folder_images(directory: &Path, image_size: u32) -> Result<Vec<DynamicImage>, Error>
     {
         let images = directory.read_dir()?.filter(|image_file|
         {
@@ -133,7 +260,7 @@ impl Imager
 
             let image = Self::resize_image(image, image_size);
 
-            Ok(image.into_rgb8())
+            Ok(image)
         }).collect::<Result<Vec<_>, Error>>()?;
 
         Ok(images)

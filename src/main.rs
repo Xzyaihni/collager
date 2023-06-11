@@ -34,7 +34,8 @@ fn main()
     let imager_config = imager::Config{
         image_size: config.pixel_size,
         allow_rotate: config.allow_rotate,
-        allow_invert: config.allow_invert
+        allow_invert: config.allow_invert,
+        depth: config.depth
     };
 
     let imager = Imager::new(config.directory, imager_config)
