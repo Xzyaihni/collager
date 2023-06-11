@@ -137,36 +137,36 @@ impl Imager
         depth: u32
     ) -> Vec<RgbaImage>
     {
-        let mut transparent_images = original_transparent_images.to_vec();
-
         if depth > 1
         {
-            let mut output_images = Vec::new();
+            let mut previous_transparent_images = original_transparent_images.to_vec();
+
+            let mut output_images = previous_transparent_images.clone();
 
             for _ in 0..(depth - 1)
             {
-                let transparent_images_iter = transparent_images.iter().cloned();
+                let mut this_transparents = Vec::new();
 
-                output_images.extend(transparent_images_iter.clone());
-
-                for transparent_image in transparent_images_iter.collect::<Vec<_>>()
+                for transparent_image in previous_transparent_images.clone()
                 {
                     for original_transparent in original_transparent_images.iter()
                     {
                         let combined =
                             Self::combine_images(transparent_image.clone(), original_transparent);
 
-                        transparent_images.push(combined);
+                        this_transparents.push(combined);
                     }
                 }
-            }
 
-            output_images.extend(transparent_images.into_iter());
+                output_images.extend(this_transparents.iter().cloned());
+
+                previous_transparent_images = this_transparents;
+            }
 
             output_images
         } else
         {
-            transparent_images
+            original_transparent_images.to_vec()
         }
     }
 
