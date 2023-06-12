@@ -10,6 +10,8 @@ mod collager;
 mod imager;
 mod config;
 
+mod colors;
+
 
 fn complain(message: &str) -> !
 {

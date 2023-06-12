@@ -1,3 +1,7 @@
+use std::{
+    ops::ControlFlow
+};
+
 use image::{
     Rgb,
     RgbImage,
@@ -113,17 +117,40 @@ impl Collager
         let subimage = self.subimage(position).to_image();
         let main_pixels = subimage.pixels();
 
-        let (index, _error) = images.iter().enumerate().map(|(index, image)|
-        {
-            let this_pixels = image.pixels();
+        let mut images = images.iter().enumerate();
 
-            (index, Self::pixels_error(main_pixels.clone(), this_pixels))
-        }).min_by(|(_, a), (_, b)|
+        struct BestFit
         {
-            a.partial_cmp(b).unwrap()
-        }).expect("images must not be empty");
+            index: usize,
+            error: f64
+        }
 
-        index
+        let mut best_fit = BestFit{
+            index: 0,
+            error: Self::pixels_error(
+                main_pixels.clone(),
+                images.next().expect("images must not be empty").1.pixels()
+            )
+        };
+
+        images.for_each(|(index, image)|
+        {
+            let error = Self::pixels_error_early_exit(
+                main_pixels.clone(),
+                image.pixels(),
+                best_fit.error
+            );
+
+            if let Some(error) = error
+            {
+                if error < best_fit.error
+                {
+                    best_fit = BestFit{index, error};
+                }
+            }
+        });
+
+        best_fit.index
     }
 
     fn subimage(&self, position: Pos2d) -> SubImage<&RgbImage>
@@ -145,5 +172,38 @@ impl Collager
 
             distance.sqrt()
         }).sum()
+    }
+
+    fn pixels_error_early_exit<'a, A, B>(a: A, b: B, min_bound: f64) -> Option<f64>
+    where
+        A: Iterator<Item=&'a Rgb<u8>>,
+        B: Iterator<Item=&'a Rgb<u8>>
+    {
+        let error = a.zip(b).map(|(a, b)|
+        {
+            let distance: f64 = a.0.iter().zip(b.0.iter()).map(|(&a, &b)|
+            {
+                (a as f64 - b as f64).powi(2)
+            }).sum();
+
+            distance.sqrt()
+        }).try_fold(0.0, |mut acc, distance|
+        {
+            acc += distance;
+
+            if acc >= min_bound
+            {
+                ControlFlow::Break(())
+            } else
+            {
+                ControlFlow::Continue(acc)
+            }
+        });
+
+        match error
+        {
+            ControlFlow::Continue(x) => Some(x),
+            ControlFlow::Break(_) => None
+        }
     }
 }
