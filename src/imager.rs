@@ -3,7 +3,6 @@ use std::{
     io,
     sync::Arc,
     borrow::Borrow,
-    ops::{Deref, DerefMut},
     path::{Path, PathBuf}
 };
 
@@ -12,7 +11,7 @@ use image::{
     Pixel,
     RgbImage,
     RgbaImage,
-    ImageBuffer,
+    Rgba32FImage,
     DynamicImage,
     buffer::ConvertBuffer,
     imageops::FilterType,
@@ -136,8 +135,14 @@ impl Imager
     fn recombine_transparents(
         original_transparent_images: &[RgbaImage],
         depth: u32
-    ) -> Vec<RgbaImage>
+    ) -> Vec<Rgba32FImage>
     {
+        // pre convert to f32 for faster combining
+        let original_transparent_images = original_transparent_images.iter().map(|image|
+        {
+            image.convert()
+        }).collect::<Vec<_>>();
+
         if depth > 1
         {
             let mut previous_transparent_images = original_transparent_images.to_vec();
@@ -152,8 +157,10 @@ impl Imager
                 {
                     for original_transparent in original_transparent_images.iter()
                     {
-                        let combined =
-                            Self::combine_images(transparent_image.clone(), original_transparent);
+                        let combined = Self::combine_images_f32(
+                            transparent_image.clone(),
+                            original_transparent
+                        );
 
                         this_transparents.push(combined);
                     }
@@ -171,14 +178,38 @@ impl Imager
         }
     }
 
-    fn combine_images<P, Container, Other>(
-        mut back: ImageBuffer<P, Container>,
-        other: Other
-    ) -> ImageBuffer<P, Container>
+    fn combine_images<O>(
+        mut back: RgbaImage,
+        other: O
+    ) -> RgbaImage
     where
-        P: Pixel,
-        Container: Deref<Target=[P::Subpixel]> + DerefMut,
-        Other: Borrow<ImageBuffer<P, Container>>
+        O: Borrow<Rgba32FImage>
+    {
+        let to_f32 = |value| value as f32 / u8::MAX as f32;
+        let from_f32 = |value| (value * u8::MAX as f32) as u8;
+
+        back.pixels_mut().zip(other.borrow().pixels()).for_each(|(pixel, other_pixel)|
+        {
+            let blended = {
+                let mut pixel: Rgba<f32> = Self::convert_pixel(*pixel, to_f32);
+
+                pixel.blend(other_pixel);
+
+                Self::convert_pixel(pixel, from_f32)
+            };
+
+            *pixel = blended;
+        });
+
+        back
+    }
+
+    fn combine_images_f32<O>(
+        mut back: Rgba32FImage,
+        other: O
+    ) -> Rgba32FImage
+    where
+        O: Borrow<Rgba32FImage>
     {
         back.pixels_mut().zip(other.borrow().pixels()).for_each(|(pixel, other_pixel)|
         {
@@ -186,6 +217,17 @@ impl Imager
         });
 
         back
+    }
+
+    fn convert_pixel<O, P, F>(pixel: Rgba<P>, mut f: F) -> Rgba<O>
+    where
+        F: FnMut(P) -> O
+    {
+        let Rgba([r, g, b, a]) = pixel;
+
+        Rgba::from(
+            [f(r), f(g), f(b), f(a)]
+        )
     }
 
     fn create_mapped_images<T, F>(
