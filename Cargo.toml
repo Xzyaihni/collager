@@ -8,3 +8,10 @@ edition = "2021"
 [dependencies]
 argparse = "0.2.2"
 image = "0.24.6"
+
+[profile.release]
+panic = "abort"
+
+[profile.release-debug]
+inherits = "release"
+debug = true

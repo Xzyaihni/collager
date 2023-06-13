@@ -1,6 +1,7 @@
 use std::{
     fs,
     io,
+    sync::Arc,
     borrow::Borrow,
     ops::{Deref, DerefMut},
     path::{Path, PathBuf}
@@ -56,21 +57,21 @@ pub struct Config
 
 pub struct Imager
 {
-    images: Box<[RgbImage]>
+    images: Arc<[RgbImage]>
 }
 
 impl Imager
 {
     pub fn new<P: AsRef<Path>>(directory: P, config: Config) -> Result<Self, Error>
     {
-        let images = Self::create_images(directory.as_ref(), config)?;
+        let images = Arc::from(Self::create_images(directory.as_ref(), config)?);
 
         Ok(Self{images})
     }
 
-    pub fn images(&self) -> &[RgbImage]
+    pub fn images(&self) -> Arc<[RgbImage]>
     {
-        &self.images
+        self.images.clone()
     }
 
     fn create_images(directory: &Path, config: Config) -> Result<Box<[RgbImage]>, Error>

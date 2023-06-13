@@ -1,5 +1,8 @@
 use std::{
-    ops::ControlFlow
+    thread,
+    borrow::Borrow,
+    sync::Arc,
+    ops::{Deref, ControlFlow}
 };
 
 use image::{
@@ -52,11 +55,11 @@ impl Collager
         Self{image, width, height, pixel_size}
     }
 
-    pub fn collage(&self, images: &[RgbImage]) -> RgbImage
+    pub fn collage(&self, images: Arc<[RgbImage]>) -> RgbImage
     {
-        let indices = self.best_indices(&images);
+        let indices = self.best_indices(images.clone());
 
-        self.construct_from_indices(indices, images)
+        self.construct_from_indices(indices.into_iter(), &images)
     }
 
     fn positions_iter(&self) -> impl Iterator<Item=Pos2d> + '_
@@ -104,20 +107,39 @@ impl Collager
         image
     }
 
-    fn best_indices<'a>(&'a self, images: &'a [RgbImage]) -> impl Iterator<Item=usize> + 'a
+    fn best_indices(&self, images: Arc<[RgbImage]>) -> Vec<usize>
     {
-        self.positions_iter().map(move |position|
+        let handles = self.positions_iter().map(move |position|
         {
-            self.best_fit_index(&images, position)
-        })
+            let subimage = Arc::new(self.subimage(position).to_image());
+            let images = images.clone();
+
+            thread::spawn(move || Self::best_fit_index_associated(subimage, images))
+        }).collect::<Vec<_>>();
+
+        handles.into_iter().map(|handle| handle.join().unwrap()).collect()
     }
 
+    #[allow(dead_code)]
     fn best_fit_index(&self, images: &[RgbImage], position: Pos2d) -> usize
     {
         let subimage = self.subimage(position).to_image();
-        let main_pixels = subimage.pixels();
 
-        let mut images = images.iter().enumerate();
+        Self::best_fit_index_associated(subimage, images)
+    }
+
+    fn best_fit_index_associated<I, Container, Images>(
+        subimage: I,
+        images: Images
+    ) -> usize
+    where
+        Container: Deref<Target=[u8]>,
+        I: Borrow<ImageBuffer<Rgb<u8>, Container>>,
+        Images: Borrow<[RgbImage]>
+    {
+        let main_pixels = subimage.borrow().pixels();
+
+        let mut images = images.borrow().iter().enumerate();
 
         struct BestFit
         {
