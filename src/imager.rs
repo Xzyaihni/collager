@@ -1,6 +1,8 @@
 use std::{
     fs,
     io,
+    thread,
+    time::Duration,
     sync::Arc,
     borrow::Borrow,
     path::{Path, PathBuf}
@@ -35,6 +37,11 @@ impl Error
             filename: Some(filename.as_ref().to_owned()),
             error
         }
+    }
+
+    pub fn error(&self) -> &ImageError
+    {
+        &self.error
     }
 }
 
@@ -294,24 +301,68 @@ impl Imager
 
     fn folder_images(directory: &Path, image_size: u32) -> Result<Vec<DynamicImage>, Error>
     {
-        let images = directory.read_dir()?.filter(|image_file|
+        let image_handles = directory.read_dir()?.filter(|image_file|
         {
             image_file.as_ref().map(|image_file|
             {
                 let is_file = image_file.file_type().ok().map(|file_type| file_type.is_file())
-                    .unwrap_or(false);
+                .unwrap_or(false);
 
                 is_file
             }).unwrap_or(true)
-        }).map(|image_file|
+        }).map(|image_file| -> Result<_, Error>
         {
-            let image_path = image_file?.path();
+            Ok(image_file?.path())
+        }).map(|image_path|
+        {
+            thread::spawn(move ||
+            {
+                let image_path = image_path?;
 
-            let image = image::open(&image_path).map_err(|err| Error::new(image_path, err))?;
+                let image = loop
+                {
+                    let image = image::open(&image_path).map_err(|err|
+                    {
+                        Error::new(image_path.clone(), err)
+                    });
 
-            let image = Self::resize_image(image, image_size);
+                    let is_recoverable = |err: &Error|
+                    {
+                        let image_error = err.error();
 
-            Ok(image)
+                        match image_error
+                        {
+                            ImageError::IoError(io_error) =>
+                            {
+                                io_error.raw_os_error().map(|code| code == 24).unwrap_or(false)
+                            },
+                            _ => false
+                        }
+                    };
+
+                    let image = match image
+                    {
+                        Ok(x) => x,
+                        Err(err) if is_recoverable(&err) =>
+                        {
+                            thread::sleep(Duration::from_millis(50));
+                            continue;
+                        },
+                        x => return x
+                    };
+
+                    break Ok::<_, Error>(image);
+                }?;
+
+                let image = Self::resize_image(image, image_size);
+
+                Ok(image)
+            })
+        }).collect::<Vec<_>>();
+
+        let images = image_handles.into_iter().map(|handle|
+        {
+            handle.join().unwrap()
         }).collect::<Result<Vec<_>, Error>>()?;
 
         Ok(images)
