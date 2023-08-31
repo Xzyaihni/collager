@@ -91,17 +91,27 @@ impl Collager
             let mut s = String::new();
 
             let mut indices = indices.clone();
-            for _y in 0..self.height
+            for y in 0..self.height
             {
-                for _x in 0..self.width
+                for x in 0..self.width
                 {
                     let index = indices.next()
                         .expect("width * height must be equal to amount of indices");
 
                     s += &images[index].name;
+
+                    // if not last
+                    if x != (self.width - 1)
+                    {
+                        s.push(' ');
+                    }
                 }
 
-                s.push('\n');
+                // if not last
+                if y != (self.height - 1)
+                {
+                    s.push('\n');
+                }
             }
 
             // if it crashes then its over

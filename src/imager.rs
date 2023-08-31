@@ -420,8 +420,11 @@ impl Imager
                 }?;
 
                 let image = Self::resize_image(image, image_size);
+                let name = image_path.file_stem()
+                    .expect("image path must be a valid image")
+                    .to_string_lossy().into_owned();
                 
-                let pair = ImagePair{image, name: image_path.to_string_lossy().into_owned()};
+                let pair = ImagePair{image, name};
 
                 Ok(pair)
             })
