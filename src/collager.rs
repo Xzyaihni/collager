@@ -1,5 +1,7 @@
 use std::{
+    fs,
     thread,
+    path::PathBuf,
     borrow::Borrow,
     sync::Arc,
     ops::{Deref, ControlFlow}
@@ -13,6 +15,8 @@ use image::{
     GenericImageView,
     imageops::{self, FilterType}
 };
+
+use crate::imager::ImagesContainer;
 
 
 struct Pos2d
@@ -34,12 +38,18 @@ pub struct Collager
     image: RgbImage,
     width: u32,
     height: u32,
-    pixel_size: u32
+    pixel_size: u32,
+    output_indices: Option<PathBuf>
 }
 
 impl Collager
 {
-    pub fn new(image: RgbImage, width: u32, pixel_size: u32) -> Self
+    pub fn new(
+        image: RgbImage,
+        width: u32,
+        pixel_size: u32,
+        output_indices: Option<PathBuf>
+    ) -> Self
     {
         let total_width = width * pixel_size;
         let width_scale = total_width as f64 / image.width() as f64;
@@ -52,10 +62,10 @@ impl Collager
 
         let height = total_height / pixel_size;
 
-        Self{image, width, height, pixel_size}
+        Self{image, width, height, pixel_size, output_indices}
     }
 
-    pub fn collage(&self, images: Arc<[RgbImage]>) -> RgbImage
+    pub fn collage(&self, images: Arc<ImagesContainer>) -> RgbImage
     {
         let indices = self.best_indices(images.clone());
 
@@ -72,10 +82,32 @@ impl Collager
 
     fn construct_from_indices(
         &self,
-        indices: impl Iterator<Item=usize>,
-        images: &[RgbImage]
+        indices: impl Iterator<Item=usize> + Clone,
+        images: &ImagesContainer
     ) -> RgbImage
     {
+        if let Some(path) = self.output_indices.as_ref()
+        {
+            let mut s = String::new();
+
+            let mut indices = indices.clone();
+            for _y in 0..self.height
+            {
+                for _x in 0..self.width
+                {
+                    let index = indices.next()
+                        .expect("width * height must be equal to amount of indices");
+
+                    s += &images[index].name;
+                }
+
+                s.push('\n');
+            }
+
+            // if it crashes then its over
+            fs::write(path, s).unwrap();
+        }
+
         let mut image =
         {
             let pixel = Rgb::<u8>::from([0, 0, 0]);
@@ -90,7 +122,7 @@ impl Collager
         {
             let mut copy_pixel = |x, y|
             {
-                let pixel = images[index].get_pixel(x, y);
+                let pixel = images[index].image.get_pixel(x, y);
 
                 image.put_pixel(position.x + x, position.y + y, *pixel);
             };
@@ -107,14 +139,20 @@ impl Collager
         image
     }
 
-    fn best_indices(&self, images: Arc<[RgbImage]>) -> Vec<usize>
+    fn best_indices(&self, images: Arc<ImagesContainer>) -> Vec<usize>
     {
         let handles = self.positions_iter().map(move |position|
         {
             let subimage = Arc::new(self.subimage(position).to_image());
             let images = images.clone();
 
-            thread::spawn(move || Self::best_fit_index_associated(subimage, images))
+            thread::spawn(move ||
+            {
+                Self::best_fit_index_associated(
+                    subimage,
+                    images.iter().map(|img| &img.image)
+                )
+            })
         }).collect::<Vec<_>>();
 
         handles.into_iter().map(|handle| handle.join().unwrap()).collect()
@@ -125,21 +163,19 @@ impl Collager
     {
         let subimage = self.subimage(position).to_image();
 
-        Self::best_fit_index_associated(subimage, images)
+        Self::best_fit_index_associated(subimage, images.iter())
     }
 
-    fn best_fit_index_associated<I, Container, Images>(
+    fn best_fit_index_associated<I, Container, InnerImage>(
         subimage: I,
-        images: Images
+        images: impl Iterator<Item=InnerImage>
     ) -> usize
     where
         Container: Deref<Target=[u8]>,
         I: Borrow<ImageBuffer<Rgb<u8>, Container>>,
-        Images: Borrow<[RgbImage]>
+        InnerImage: Borrow<RgbImage>
     {
         let main_pixels = subimage.borrow().pixels();
-
-        let mut images = images.borrow().iter().enumerate();
 
         struct BestFit
         {
@@ -147,11 +183,13 @@ impl Collager
             error: f64
         }
 
+        let mut images = images.enumerate();
+
         let mut best_fit = BestFit{
             index: 0,
             error: Self::pixels_error(
                 main_pixels.clone(),
-                images.next().expect("images must not be empty").1.pixels()
+                images.next().expect("images must not be empty").1.borrow().pixels()
             )
         };
 
@@ -159,7 +197,7 @@ impl Collager
         {
             let error = Self::pixels_error_early_exit(
                 main_pixels.clone(),
-                image.pixels(),
+                image.borrow().pixels(),
                 best_fit.error
             );
 

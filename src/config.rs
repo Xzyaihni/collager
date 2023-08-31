@@ -1,8 +1,9 @@
 use std::{
-    fmt::Display
+    fmt::Display,
+    path::PathBuf
 };
 
-use argparse::{ArgumentParser, StoreTrue, Store};
+use argparse::{ArgumentParser, StoreOption, StoreTrue, Store};
 
 
 pub struct Config
@@ -11,6 +12,7 @@ pub struct Config
     pub pixel_size: u32,
     pub allow_rotate: bool,
     pub allow_invert: bool,
+    pub output_indices: Option<PathBuf>,
     pub depth: u32,
     pub width: u32,
     pub output: String,
@@ -52,6 +54,9 @@ impl Config
 
             parser.refer(&mut config.allow_invert)
                 .add_option(&["-I", "--invert"], StoreTrue, "allow inverting the images");
+
+            parser.refer(&mut config.output_indices)
+                .add_option(&["-N", "--names"], StoreOption, "output image names in the collage");
 
             parser.refer(&mut config.depth)
                 .add_option(&["-D", "--depth"], Store, &d_description);
@@ -96,6 +101,7 @@ impl Default for Config
             pixel_size: 16,
             allow_rotate: false,
             allow_invert: false,
+            output_indices: None,
             depth: 0,
             width: 16,
             output: "output.png".to_owned(),

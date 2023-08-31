@@ -1,6 +1,4 @@
-use std::{
-    process
-};
+use std::process;
 
 use collager::Collager;
 use imager::Imager;
@@ -30,7 +28,8 @@ fn main()
     let collager = Collager::new(
         image.into_rgb8(),
         config.width,
-        config.pixel_size
+        config.pixel_size,
+        config.output_indices
     );
 
     let imager_config = imager::Config{
