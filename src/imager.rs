@@ -323,7 +323,13 @@ impl Imager
         if config.allow_rotate
         {
             let mut rotated = {
-                let images = images.iter();
+                let images_original = images.iter();
+                let images_mirrored = images_original.clone().map(|image|
+                {
+                    image.map_image_ref(|image| image.fliph())
+                }).collect::<Vec<_>>();
+
+                let images = images_original.chain(images_mirrored.iter());
 
                 let rotated90 = images.clone().map(|image|
                 {
