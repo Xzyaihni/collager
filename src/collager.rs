@@ -2,40 +2,33 @@ use std::{
     fs,
     thread,
     path::PathBuf,
-    borrow::Borrow,
     sync::Arc,
-    ops::{Deref, ControlFlow}
+    ops::ControlFlow
 };
 
 use image::{
     Rgb,
     RgbImage,
-    SubImage,
     ImageBuffer,
-    GenericImageView,
     imageops::{self, FilterType}
 };
 
-use crate::imager::ImagesContainer;
+use crate::{
+    Lab,
+    LabImage,
+    imager::{LabImagesContainer, ImagesContainer}
+};
 
 
-struct Pos2d
+pub struct Vec2
 {
-    x: u32,
-    y: u32
-}
-
-impl Pos2d
-{
-    pub fn new(x: u32, y: u32) -> Self
-    {
-        Self{x, y}
-    }
+    pub x: u32,
+    pub y: u32
 }
 
 pub struct Collager
 {
-    image: RgbImage,
+    image: LabImage,
     width: u32,
     height: u32,
     pixel_size: u32,
@@ -58,7 +51,8 @@ impl Collager
 
         let filter_type = FilterType::CatmullRom;
 
-        let image = imageops::resize(&image, total_width, total_height, filter_type);
+        let image: LabImage = imageops::resize(&image, total_width, total_height, filter_type)
+            .into();
 
         let height = total_height / pixel_size;
 
@@ -67,16 +61,24 @@ impl Collager
 
     pub fn collage(&self, images: Arc<ImagesContainer>) -> RgbImage
     {
-        let indices = self.best_indices(images.clone());
+        let lab_images: LabImagesContainer = images.iter().cloned().map(|pair|
+        {
+            LabImage::from(pair.image)
+        }).collect();
+
+        let indices = self.best_indices(Arc::new(lab_images));
 
         self.construct_from_indices(indices.into_iter(), &images)
     }
 
-    fn positions_iter(&self) -> impl Iterator<Item=Pos2d> + '_
+    fn positions_iter(&self) -> impl Iterator<Item=Vec2> + '_
     {
         (0..self.height).flat_map(move |y|
         {
-            (0..self.width).map(move |x| Pos2d::new(x * self.pixel_size, y * self.pixel_size))
+            (0..self.width).map(move |x|
+            {
+                Vec2{x: x * self.pixel_size, y: y * self.pixel_size}
+            })
         })
     }
 
@@ -149,18 +151,22 @@ impl Collager
         image
     }
 
-    fn best_indices(&self, images: Arc<ImagesContainer>) -> Vec<usize>
+    fn best_indices(&self, images: Arc<LabImagesContainer>) -> Vec<usize>
     {
         let handles = self.positions_iter().map(move |position|
         {
-            let subimage = Arc::new(self.subimage(position).to_image());
+            let image = self.image.clone();
             let images = images.clone();
+
+            let size = Vec2{x: self.pixel_size, y: self.pixel_size};
 
             thread::spawn(move ||
             {
-                Self::best_fit_index_associated(
-                    subimage,
-                    images.iter().map(|img| &img.image)
+                Self::best_fit_index_assoc(
+                    &image,
+                    images.iter(),
+                    position,
+                    size
                 )
             })
         }).collect::<Vec<_>>();
@@ -169,45 +175,58 @@ impl Collager
     }
 
     #[allow(dead_code)]
-    fn best_fit_index(&self, images: &[RgbImage], position: Pos2d) -> usize
+    fn best_fit_index<'a>(
+        &self,
+        images: impl Iterator<Item=&'a LabImage>,
+        position: Vec2
+    ) -> usize
     {
-        let subimage = self.subimage(position).to_image();
-
-        Self::best_fit_index_associated(subimage, images.iter())
+        Self::best_fit_index_assoc(
+            &self.image,
+            images,
+            position,
+            Vec2{x: self.pixel_size, y: self.pixel_size}
+        )
     }
 
-    fn best_fit_index_associated<I, Container, InnerImage>(
+    #[allow(dead_code)]
+    fn best_fit_index_assoc<'a>(
+        image: &LabImage,
+        images: impl Iterator<Item=&'a LabImage>,
+        position: Vec2,
+        size: Vec2
+    ) -> usize
+    {
+        let subimage = image.subimage_pixels(position, size);
+
+        Self::best_fit_index_associated(subimage.iter().copied(), images)
+    }
+
+    fn best_fit_index_associated<'a, I>(
         subimage: I,
-        images: impl Iterator<Item=InnerImage>
+        images: impl Iterator<Item=&'a LabImage>
     ) -> usize
     where
-        Container: Deref<Target=[u8]>,
-        I: Borrow<ImageBuffer<Rgb<u8>, Container>>,
-        InnerImage: Borrow<RgbImage>
+        I: Iterator<Item=Lab> + Clone
     {
-        let main_pixels = subimage.borrow().pixels();
-
         struct BestFit
         {
             index: usize,
-            error: f64
+            error: f32
         }
 
-        let mut images = images.enumerate();
+        let images = images.enumerate();
 
         let mut best_fit = BestFit{
             index: 0,
-            error: Self::pixels_error(
-                main_pixels.clone(),
-                images.next().expect("images must not be empty").1.borrow().pixels()
-            )
+            error: f32::INFINITY
         };
 
         images.for_each(|(index, image)|
         {
             let error = Self::pixels_error_early_exit(
-                main_pixels.clone(),
-                image.borrow().pixels(),
+                subimage.clone(),
+                image.pixels(),
                 best_fit.error
             );
 
@@ -223,40 +242,14 @@ impl Collager
         best_fit.index
     }
 
-    fn subimage(&self, position: Pos2d) -> SubImage<&RgbImage>
-    {
-        self.image.view(position.x, position.y, self.pixel_size, self.pixel_size)
-    }
-
-    fn pixels_error<'a, A, B>(a: A, b: B) -> f64
+    fn pixels_error_early_exit<'a, A, B>(a: A, b: B, min_bound: f32) -> Option<f32>
     where
-        A: Iterator<Item=&'a Rgb<u8>>,
-        B: Iterator<Item=&'a Rgb<u8>>
-    {
-        a.zip(b).map(|(a, b)|
-        {
-            let distance: f64 = a.0.iter().zip(b.0.iter()).map(|(&a, &b)|
-            {
-                (a as f64 - b as f64).powi(2)
-            }).sum();
-
-            distance.sqrt()
-        }).sum()
-    }
-
-    fn pixels_error_early_exit<'a, A, B>(a: A, b: B, min_bound: f64) -> Option<f64>
-    where
-        A: Iterator<Item=&'a Rgb<u8>>,
-        B: Iterator<Item=&'a Rgb<u8>>
+        A: Iterator<Item=Lab>,
+        B: Iterator<Item=Lab>
     {
         let error = a.zip(b).map(|(a, b)|
         {
-            let distance: f64 = a.0.iter().zip(b.0.iter()).map(|(&a, &b)|
-            {
-                (a as f64 - b as f64).powi(2)
-            }).sum();
-
-            distance.sqrt()
+            a.distance(b)
         }).try_fold(0.0, |mut acc, distance|
         {
             acc += distance;

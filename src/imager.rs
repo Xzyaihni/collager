@@ -9,17 +9,84 @@ use std::{
 };
 
 use image::{
+    Rgb,
     Rgba,
     Pixel,
     RgbImage,
+    Rgb32FImage,
     RgbaImage,
     Rgba32FImage,
     DynamicImage,
+    GenericImageView,
     buffer::ConvertBuffer,
     imageops::FilterType,
     error::ImageError
 };
 
+use crate::{Vec2, Lab};
+
+
+type LabInner = Rgb32FImage;
+
+// i hate this library
+#[derive(Debug, Clone)]
+pub struct LabImage(LabInner);
+
+impl LabImage
+{
+    pub fn width(&self) -> u32
+    {
+        self.0.width()
+    }
+
+    pub fn height(&self) -> u32
+    {
+        self.0.height()
+    }
+
+    pub fn pixels(&self) -> impl Iterator<Item=Lab> + '_
+    {
+        self.0.pixels()
+            .copied()
+            .map(|Rgb([l, a, b])| Lab{l, a, b})
+    }
+
+    pub fn subimage_pixels(
+        &self,
+        position: Vec2,
+        size: Vec2
+    ) -> Vec<Lab>
+    {
+        self.0.view(position.x, position.y, size.x, size.y)
+            .pixels()
+            .map(|(_x, _y, pixel)| pixel)
+            .map(|Rgb([l, a, b])| Lab{l, a, b})
+            .collect()
+    }
+}
+
+impl From<RgbImage> for LabImage
+{
+    fn from(value: RgbImage) -> Self
+    {
+        <Self as From<Rgb32FImage>>::from(value.convert())
+    }
+}
+
+impl From<Rgb32FImage> for LabImage
+{
+    fn from(mut value: Rgb32FImage) -> Self
+    {
+        value.pixels_mut().for_each(|pixel|
+        {
+            let lab = Lab::from(*pixel);
+
+            *pixel = Rgb::from([lab.l, lab.a, lab.b]);
+        });
+
+        Self(value)
+    }
+}
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -72,14 +139,9 @@ impl<T> ImagePair<T>
 {
     pub fn map_image<U>(self, f: impl FnOnce(T) -> U) -> ImagePair<U>
     {
-        let Self{
-            image,
-            name
-        } = self;
-
         ImagePair{
-            image: f(image),
-            name
+            image: f(self.image),
+            name: self.name
         }
     }
 
@@ -93,6 +155,7 @@ impl<T> ImagePair<T>
 }
 
 pub type ImagesContainer = Vec<ImagePair>;
+pub type LabImagesContainer = Vec<LabImage>;
 
 pub struct Imager
 {

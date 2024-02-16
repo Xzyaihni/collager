@@ -1,5 +1,9 @@
 use std::process;
 
+pub use colors::Lab;
+pub use imager::LabImage;
+pub use collager::Vec2;
+
 use collager::Collager;
 use imager::Imager;
 use config::Config;
@@ -8,7 +12,7 @@ mod collager;
 mod imager;
 mod config;
 
-mod colors;
+pub mod colors;
 
 
 fn complain(message: &str) -> !
