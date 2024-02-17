@@ -20,6 +20,8 @@ use crate::{
 };
 
 
+const SQRT_DISTANCE: bool = false;
+
 pub struct Vec2
 {
     pub x: u32,
@@ -249,7 +251,13 @@ impl Collager
     {
         let error = a.zip(b).map(|(a, b)|
         {
-            a.distance(b)
+            if SQRT_DISTANCE
+            {
+                a.distance(b).sqrt()
+            } else
+            {
+                a.distance(b)
+            }
         }).try_fold(0.0, |mut acc, distance|
         {
             acc += distance;

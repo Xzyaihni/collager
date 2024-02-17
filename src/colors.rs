@@ -17,7 +17,7 @@ impl Lab
         let d_a = other.a - self.a;
         let d_b = other.b - self.b;
 
-        (d_l.powi(2) + d_a.powi(2) + d_b.powi(2)).sqrt()
+        d_l.powi(2) + d_a.powi(2) + d_b.powi(2)
     }
 }
 
